@@ -1,0 +1,131 @@
+#!/usr/bin/env osascript
+# To be installed as: /opt/X11/bin/ssh-askpass
+# If you don't already have XQuartz installed you might need to run:
+# sudo /usr/libexec/x11-select /opt/X11
+on run argv
+	set Approved to "no"
+	set notifyOnApproval to true
+	set argText to "Allow use of key in your SSH agent?"
+	if 0 < (count argv) then
+		set argText to my textJoin("\n", argv)
+		set parsedResults to my parsePrompts(argText)
+		if prompted of parsedResults or keychain of parsedResults then
+			return passphrase of parsedResults
+		end if
+	end if
+	try
+		set alertResult to display alert argText as critical buttons {"Reject", "Approve"} cancel button "Reject" giving up after 30
+	on error number -128
+		set alertResult to {gave up:false, button returned:"Reject"}
+	end try
+	if "Approve" is equal to button returned of alertResult then
+		set Approved to "yes"
+		set soundName to "Pop"
+		set reason to "Signing Request Authorized"
+		if not notifyOnApproval then
+			return Approved
+		end if
+	else
+		set soundName to "Basso"
+		set reason to "Access to key DENIED"
+		if gave up of alertResult then
+			set reason to "Timed Out"
+			set soundName to "Submarine"
+		end if
+	end if
+
+	set notifyText to my messageDisector(argText)
+
+	if soundName is equal to missing value then
+		display notification notifyText with title "ssh-askpass" subtitle reason
+	else
+		display notification notifyText with title "ssh-askpass" subtitle reason sound name soundName
+	end if
+
+	delay 1
+
+	return Approved
+end run
+
+to parsePrompts(argText)
+	set foundInKeychain to false
+	set inputPassphrase to missing value
+	set promptForPassphrase to false
+
+	if argText contains "Enter passphrase for" then
+		try
+			set keyPath to my parseKeyFile(argText)
+
+			# TODO: It'd be better to do this in AppleScript directly.
+			set inputPassphrase to do shell script "security find-generic-password -w -s SSH -a " & quoted form of keyPath
+			set foundInKeychain to true
+		on error number 44
+			set promptForPassphrase to true
+		end try
+	else if argText contains "Bad passphrase, try again for" then
+		set promptForPassphrase to true
+	end if
+
+	if promptForPassphrase then
+		set inputPassphrase to text returned of (display dialog argText default answer "" hidden answer true buttons {"Cancel", "OK"} default button "OK" cancel button "Cancel" with title "ssh-askpass" giving up after 600)
+	end if
+
+	return {keychain:foundInKeychain, passphrase:inputPassphrase, prompted:promptForPassphrase}
+end parsePrompts
+
+to parseKeyFile(argText)
+	if argText contains "(will confirm each use):" then
+		set argWords to my textSplit(" ", argText)
+		set endItem to ((count argWords) - 5)
+	else
+		set argColonParts to my textSplit(":", argText)
+		set withoutEndColon to my textJoin(":", items 1 thru ((count argColonParts) - 1) of argColonParts)
+		set argWords to my textSplit(" ", withoutEndColon)
+		set endItem to (count argWords)
+	end if
+
+	return my textJoin(" ", items 4 thru endItem of argWords)
+end parseKeyFile
+
+to messageDisector(argText)
+	copy argText to retText
+
+	set LinesList to my textSplit("\n", retText)
+	set parts to my textSplit("?", item 1 of LinesList)
+	set LineOne to item 1 of parts
+	set wordsLineOne to my textSplit(" ", LineOne)
+	if 5 ≤ (count wordsLineOne) then
+		set keyFile to my textJoin(" ", items 5 thru (count wordsLineOne) of wordsLineOne)
+		set parts to my textSplit("/", keyFile)
+		set keyFile to item (count parts) of parts
+		set retText to "Key " & keyFile
+		if 1 = (count parts) then
+			set retText to retText & "."
+		end if
+	end if
+	if 1 < (count LinesList) then
+		set wordsLineTwo to my textSplit(" ", item 2 of LinesList)
+		if 3 ≤ (count wordsLineTwo) then
+			set fingerprint to my textJoin(" ", items 3 thru (count wordsLineTwo) of wordsLineTwo)
+			set retText to retText & " with fingerprint " & fingerprint
+		end if
+	end if
+
+	return retText
+end messageDisector
+
+to textSplit(argDelim, argStr)
+	set savedDelims to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to argDelim
+	set retList to argStr's text items
+	set AppleScript's text item delimiters to savedDelims
+	return retList
+end textSplit
+
+to textJoin(argSep, argList)
+	set savedDelims to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to argSep
+	set retStr to argList as string
+	set AppleScript's text item delimiters to savedDelims
+	return retStr
+end textJoin
