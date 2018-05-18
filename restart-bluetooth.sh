@@ -21,7 +21,7 @@ get_bt_state() {
 [ "on" = "$(get_bt_state)" ] || exit 0
 
 get_wifi_dev() {
-    local _awk_program='$NF ~ /^Wi-Fi$/ {getline; print $2;}'
+    local _awk_program='$NF ~ /^Wi-Fi$/ {getline; print $2; exit;}'
 
     networksetup -listallhardwareports | awk "$_awk_program"
 }
